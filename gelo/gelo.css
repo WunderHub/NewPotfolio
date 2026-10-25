@@ -1,0 +1,93 @@
+/* Página /gelo: cena WebGL fixa ao fundo; cada "estado" (início, 4 trabalhos, manifesto, contato)
+   é um painel HTML fixo que aparece por cima quando a rolagem chega nele. Tema escuro e gelado. */
+:root {
+  --ink: #04070f;
+  --ice: #e6eeff;
+  --mist: #8e9bc4;
+  --cobalt: #4a63ff;
+  --line: rgba(230, 238, 255, .16);
+  --display: "Archivo", "Arial Black", Impact, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--ink); color: var(--ice); }
+body { font-family: var(--mono); font-size: 13px; line-height: 1.6; overflow-x: hidden; }
+a, button { color: inherit; font: inherit; }
+a { text-decoration: none; }
+h1, h2, p { margin: 0; }
+a:focus-visible, button:focus-visible { outline: 1px solid var(--ice); outline-offset: 4px; }
+html.lenis, html.lenis body { height: auto; }
+.lenis.lenis-smooth { scroll-behavior: auto !important; }
+
+#gl { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0; }
+#scroller { height: 1400vh; }
+
+/* Moldura e HUD */
+.hud { position: fixed; left: 0; right: 0; z-index: 20; display: flex; align-items: center; gap: 24px;
+  padding-left: max(20px, env(safe-area-inset-left, 0px)); padding-right: max(20px, env(safe-area-inset-right, 0px));
+  text-transform: uppercase; letter-spacing: .08em; font-size: 11px; color: var(--mist); }
+.hud-top { top: 0; padding-top: calc(18px + env(safe-area-inset-top, 0px)); }
+.hud-top .logo { font-family: var(--display); font-stretch: 125%; font-weight: 800; font-size: 18px; letter-spacing: -.02em; color: var(--ice); }
+.hud-top nav { margin-left: auto; display: flex; gap: 20px; }
+.hud-top nav a { color: var(--ice); padding: 4px 0; border-bottom: 1px solid transparent; transition: border-color .3s; }
+.hud-top nav a:hover, .hud-top nav a.on { border-color: var(--ice); }
+.hud-bottom { bottom: 0; padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px)); }
+.hud-bottom b { color: var(--ice); font-weight: 400; }
+.hud-bottom .bar { flex: 1; height: 1px; background: var(--line); position: relative; overflow: hidden; min-width: 40px; }
+.hud-bottom .bar i { position: absolute; inset: 0; background: var(--ice); transform-origin: left; transform: scaleX(0); }
+.frame i { position: fixed; width: 12px; height: 12px; z-index: 19; border: 0 solid var(--line); pointer-events: none; }
+.frame i:nth-child(1) { top: 56px; left: 20px; border-top-width: 1px; border-left-width: 1px; }
+.frame i:nth-child(2) { top: 56px; right: 20px; border-top-width: 1px; border-right-width: 1px; }
+.frame i:nth-child(3) { bottom: 50px; left: 20px; border-bottom-width: 1px; border-left-width: 1px; }
+.frame i:nth-child(4) { bottom: 50px; right: 20px; border-bottom-width: 1px; border-right-width: 1px; }
+
+/* Painéis */
+.panel { position: fixed; z-index: 10; left: max(40px, env(safe-area-inset-left, 0px)); bottom: 90px; width: min(560px, calc(100% - 80px));
+  display: grid; gap: 18px; pointer-events: none; }
+.js .panel { visibility: hidden; }
+.panel.on { visibility: visible; pointer-events: auto; }
+.panel.right { width: min(720px, calc(50% - 60px)); left: auto; right: max(40px, env(safe-area-inset-right, 0px)); }
+.panel.center .title { font-size: clamp(40px, 6vw, 96px); }
+.panel.center { left: 50%; translate: -50% 0; text-align: center; justify-items: center; width: min(760px, calc(100% - 40px)); }
+.eyebrow { text-transform: uppercase; letter-spacing: .1em; font-size: 11px; color: var(--mist); }
+.title { font-family: var(--display); font-stretch: 125%; font-weight: 800; text-transform: uppercase; letter-spacing: -.045em;
+  font-size: clamp(40px, 5.4vw, 100px); line-height: .84; text-wrap: balance; }
+.title.small { font-size: clamp(30px, 4.4vw, 64px); line-height: .95; text-transform: none; letter-spacing: -.03em; font-weight: 600; font-stretch: 100%; }
+.title .ln { display: block; overflow: hidden; }
+.title .ln > span { display: inline-block; }
+.lede { font-size: 14px; color: var(--ice); max-width: 44ch; opacity: .85; }
+.cue { color: var(--mist); text-transform: uppercase; letter-spacing: .1em; font-size: 11px; }
+.tag { justify-self: start; border: 1px dashed var(--mist); color: var(--mist); border-radius: 999px; padding: 1px 10px; font-size: 10px; text-transform: uppercase; letter-spacing: .1em; }
+.mail { font-family: var(--display); font-weight: 500; font-size: clamp(20px, 3.4vw, 44px); letter-spacing: -.03em; overflow-wrap: anywhere; user-select: all; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+.links a, .links button { text-transform: uppercase; letter-spacing: .08em; font-size: 11px; padding: 10px 16px; border: 1px solid var(--line);
+  border-radius: 999px; background: rgba(4, 7, 15, .5); backdrop-filter: blur(6px); cursor: pointer; transition: background .3s, color .3s; }
+.links a:hover, .links button:hover { background: var(--ice); color: var(--ink); }
+
+/* Carregamento */
+.loader { position: fixed; inset: 0; z-index: 100; background: var(--ink); display: none; flex-direction: column; justify-content: space-between;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px)); }
+.js .loader { display: flex; }
+.loader-top { display: flex; justify-content: space-between; text-transform: uppercase; letter-spacing: .1em; font-size: 11px; color: var(--mist); }
+.loader-num { font-family: var(--display); font-stretch: 125%; font-weight: 800; font-size: clamp(90px, 22vw, 320px); line-height: .8; letter-spacing: -.05em; font-variant-numeric: tabular-nums; }
+.enter { align-self: flex-start; text-transform: uppercase; letter-spacing: .12em; font-size: 12px; padding: 14px 28px; border-radius: 999px;
+  border: 1px solid var(--ice); background: transparent; cursor: pointer; opacity: .25; transition: opacity .4s, background .3s, color .3s; }
+.enter:not([disabled]) { opacity: 1; }
+.enter:not([disabled]):hover { background: var(--ice); color: var(--ink); }
+
+/* Sem WebGL ou sem JS: os painéis viram uma página comum */
+.no-webgl #gl, .no-webgl #scroller, .no-webgl .frame, .no-webgl .hud-bottom { display: none; }
+.no-webgl .panel, html:not(.js) .panel { position: relative; visibility: visible; inset: auto; translate: none; width: auto;
+  max-width: 760px; margin: 0 auto; padding: 120px 20px; pointer-events: auto; text-align: left; justify-items: start; }
+.no-webgl .links, html:not(.js) .links { justify-content: flex-start; }
+html:not(.js) #scroller, html:not(.js) .loader { display: none; }
+
+@media (max-width: 760px) {
+  .hide-sm { display: none; }
+  .panel, .panel.right { left: 20px; right: 20px; width: auto; bottom: 74px; gap: 12px; }
+  .panel.center { left: 50%; right: auto; width: calc(100% - 40px); }
+  .hud-top nav { gap: 14px; }
+  .lede { font-size: 13px; }
+  .frame { display: none; }
+}
