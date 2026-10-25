@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Kauê Ribeiro, designer e desenvolvedor de sites. Versão experimental em 3D: blocos de gelo, partículas na GPU e transições congeladas.">
+<meta name="description" content="Kauê Ribeiro, design e desenvolvimento web. Portfólio em 3D.">
 <title>Kauê Ribeiro · Gelo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=JetBrains+Mono:wght@300;400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=JetBrains+Mono:wght@400;500&display=swap">
 <link rel="stylesheet" href="gelo/gelo.css">
 <script>document.documentElement.classList.add('js');</script>
 <script type="importmap">
@@ -17,93 +17,64 @@
 } }
 </script>
 </head>
-<body>
+<body data-state="iglu">
 
 <div class="loader" id="loader">
-  <div class="loader-top"><span>KR / Gelo</span><span id="loadMsg">resfriando a cena</span></div>
-  <div class="loader-num" id="loadNum">000</div>
-  <button class="enter" id="enter" type="button" disabled>Entrar</button>
+  <div class="row"><span class="chip">KR</span><span id="loadMsg">Carregando</span></div>
+  <div class="num" id="loadNum">000</div>
+  <button class="chip btn" id="enter" type="button" disabled>Entrar</button>
 </div>
 
 <canvas id="gl" aria-hidden="true"></canvas>
+<canvas id="hud" aria-hidden="true"></canvas>
 
-<header class="hud hud-top">
-  <a class="logo" href="#s0" data-go="0">KR</a>
-  <span class="hide-sm" data-scramble>Portfólio · 2026</span>
-  <nav aria-label="Seções">
-    <a href="#s1" data-go="1">Trabalhos</a>
-    <a href="#s5" data-go="5">Manifesto</a>
-    <a href="#s6" data-go="6">Contato</a>
-  </nav>
+<header class="ui tl">
+  <a class="chip logo" href="#s0" data-go="0">KR</a>
+  <div class="data" aria-hidden="true"><span id="dScene">SCN 00 · Iglu</span><span id="dClock">--:--:--</span><span id="dFps">FPS --</span></div>
 </header>
-<div class="hud hud-bottom" aria-hidden="true">
-  <span><b id="hudIdx">00</b> / 06</span>
-  <span id="hudName" class="hide-sm">Início</span>
-  <span class="bar"><i id="hudBar"></i></span>
-  <span id="hudPct">000%</span>
+<nav class="ui tr" aria-label="Seções">
+  <a class="chip" href="#s1" data-go="1">Trabalhos</a>
+  <a class="chip" href="#s5" data-go="5">Contato</a>
+</nav>
+<div class="ui bl" aria-live="polite">
+  <span class="chip" id="labelA">Kauê Ribeiro</span>
+  <span class="sub" id="labelB">Design e desenvolvimento web</span>
 </div>
-<div class="frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<div class="ui br" aria-hidden="true"><span id="pNum">000</span><span class="bar"><i id="pBar"></i></span></div>
 
-<main id="panels">
-  <section class="panel" id="s0" data-state="0">
-    <p class="eyebrow" data-scramble>Designer e desenvolvedor de sites</p>
-    <h1 class="title">Kauê<br>Ribeiro</h1>
-    <p class="lede">Sites, landing pages e experiências 3D que ficam na memória. Passe o cursor no gelo e role para entrar.</p>
-    <p class="cue" data-scramble>Role para baixo</p>
-  </section>
+<div class="ui stage-ui" id="stageUi">
+  <div class="shapes">
+    <button class="arrow" id="prev" type="button" aria-label="Forma anterior">←</button>
+    <span class="chip" id="shapeName">01 / 04 · KR</span>
+    <button class="arrow" id="next" type="button" aria-label="Próxima forma">→</button>
+  </div>
+  <div class="contact">
+    <span class="chip mail" id="mail">seuemail@exemplo.com</span>
+    <button class="chip btn" id="copy" type="button">Copiar</button>
+    <a class="chip btn" href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+    <a class="chip btn" href="https://www.linkedin.com/" target="_blank" rel="noopener">LinkedIn</a>
+    <a class="chip btn" href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram</a>
+  </div>
+</div>
 
-  <section class="panel right" id="s1" data-state="1">
-    <p class="eyebrow" data-scramble>01 · Landing page</p>
-    <h2 class="title">Curso de<br>fotografia</h2>
-    <p class="lede">Pré-venda com prova social antes do preço. 4,2% de conversão.</p>
-    <p class="tag">exemplo</p>
-  </section>
-
-  <section class="panel right" id="s2" data-state="2">
-    <p class="eyebrow" data-scramble>02 · Site institucional</p>
-    <h2 class="title">Clínica de<br>fisioterapia</h2>
-    <p class="lede">Agendamento pelo WhatsApp em todas as páginas. +68% de pedidos.</p>
-    <p class="tag">exemplo</p>
-  </section>
-
-  <section class="panel right" id="s3" data-state="3">
-    <p class="eyebrow" data-scramble>03 · Interface</p>
-    <h2 class="title">Painel de<br>cozinha</h2>
-    <p class="lede">Pedidos por status, legíveis a dois metros de um tablet.</p>
-    <p class="tag">exemplo</p>
-  </section>
-
-  <section class="panel right" id="s4" data-state="4">
-    <p class="eyebrow" data-scramble>04 · Experiência 3D</p>
-    <h2 class="title">Galeria<br>de arte</h2>
-    <p class="lede">Visita às obras em 3D direto no navegador, sem instalar nada.</p>
-    <p class="tag">exemplo</p>
-  </section>
-
-  <section class="panel" id="s5" data-state="5">
-    <p class="eyebrow" data-scramble>05 · Manifesto</p>
-    <h2 class="title small">Um site bom é aquele que alguém lembra no dia seguinte.</h2>
-    <p class="lede">Cuido de tudo: texto, direção visual, 3D, animação e código. Um só responsável do primeiro rascunho até o site no ar.</p>
-  </section>
-
-  <section class="panel center" id="s6" data-state="6">
-    <p class="eyebrow" data-scramble>06 · Contato</p>
-    <h2 class="title">Vamos<br>conversar</h2>
-    <p class="mail" id="mail">seuemail@exemplo.com</p>
-    <div class="links">
-      <button type="button" id="copy">Copiar e-mail</button>
-      <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
-      <a href="https://www.linkedin.com/" target="_blank" rel="noopener">LinkedIn</a>
-      <a href="https://www.instagram.com/" target="_blank" rel="noopener">Instagram</a>
-      <a href="/">Versão clássica</a>
-    </div>
-  </section>
+<!-- Conteúdo em texto: lido por leitores de tela e buscadores; vira a página quando não há WebGL -->
+<main class="content" id="content">
+  <h1>Kauê Ribeiro</h1>
+  <p>Design e desenvolvimento web.</p>
+  <h2>Trabalhos</h2>
+  <ol>
+    <li>Curso de fotografia · Landing page (exemplo)</li>
+    <li>Clínica de fisioterapia · Site institucional (exemplo)</li>
+    <li>Painel de cozinha · Interface (exemplo)</li>
+    <li>Galeria de arte · Experiência 3D (exemplo)</li>
+  </ol>
+  <h2>Contato</h2>
+  <p>seuemail@exemplo.com · <a href="/">versão clássica do site</a></p>
 </main>
 
 <div id="scroller" aria-hidden="true"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
 <script src="https://unpkg.com/lenis@1.1.13/dist/lenis.min.js"></script>
 <script type="module" src="gelo/main.js"></script>
 </body>

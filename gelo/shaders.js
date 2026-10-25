@@ -82,7 +82,7 @@ void main(){
   float m = smoothstep(0., 1., clamp(uMix * 1.5 - r * .5, 0., 1.));
   vec3 target = mix(texture2D(tA, uv).xyz, texture2D(tB, uv).xyz, m);
   v += (target - p) * (2.6 + r * 1.4) * uDt;
-  v += curl(p * .55 + vec3(0., uTime * .07, 0.)) * (.35 + uChaos * 3.5) * uDt;
+  v += curl(p * .55 + vec3(0., uTime * .07, 0.)) * (.18 + uChaos * 3.) * uDt;
   vec3 dm = p - uMouse;
   float d2 = dot(dm, dm);
   v += normalize(dm + 1e-4) * uMouseOn * 7. * exp(-d2 * 1.6) * uDt;
@@ -101,82 +101,51 @@ void main(){
 }
 `;
 
-// Desenho das partículas, com profundidade de campo pelo tamanho do ponto.
-export const dustVert = /* glsl */ `
+// Partículas do palco: cada ponto é desenhado como uma pequena esfera iluminada (normal falsa no sprite).
+export const beadVert = /* glsl */ `
 uniform sampler2D tPos;
 uniform sampler2D tVel;
 uniform float uSize;
-uniform float uPR;
-uniform float uFocus;
+uniform float uScale;
 attribute vec2 ref;
-varying float vAlpha;
-varying float vSpeed;
+varying float vDepth;
 varying float vR;
+varying float vSpeed;
 void main(){
   vec4 P = texture2D(tPos, ref);
-  vec3 v = texture2D(tVel, ref).xyz;
   vec4 mv = modelViewMatrix * vec4(P.xyz, 1.);
   gl_Position = projectionMatrix * mv;
-  float blur = smoothstep(.4, 4.5, abs(-mv.z - uFocus));
-  gl_PointSize = uSize * uPR * (.55 + P.w * .9) * mix(1., 3.2, blur) / -mv.z;
-  vAlpha = mix(1., .14, blur);
-  vSpeed = length(v);
-  vR = P.w;
+  gl_PointSize = max(1.5, uSize * (.7 + P.w * .6) * uScale / -mv.z);
+  vDepth = -mv.z; vR = P.w; vSpeed = length(texture2D(tVel, ref).xyz);
 }
 `;
 
-export const dustFrag = /* glsl */ `
-uniform vec3 uIce;
-uniform vec3 uTint;
-uniform float uAlpha;
-varying float vAlpha;
-varying float vSpeed;
+export const beadFrag = /* glsl */ `
+uniform vec3 uLight;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+varying float vDepth;
 varying float vR;
+varying float vSpeed;
 void main(){
-  float d = length(gl_PointCoord - .5);
-  if (d > .5) discard;
-  float a = smoothstep(.5, .1, d) * vAlpha;
-  vec3 col = mix(uTint, uIce, smoothstep(.15, .9, vR * .7 + vSpeed * .35));
-  col += uIce * smoothstep(.6, 2.5, vSpeed) * .6;
-  a *= .75;
-  gl_FragColor = vec4(col * a * uAlpha, a * uAlpha);
+  vec2 c = gl_PointCoord * 2. - 1.;
+  float r2 = dot(c, c);
+  if (r2 > 1.) discard;
+  vec3 n = vec3(c.x, -c.y, sqrt(1. - r2));
+  float diff = max(dot(n, uLight), 0.);
+  float rim = pow(1. - n.z, 2.);
+  vec3 col = mix(vec3(.05, .06, .085), vec3(.62, .68, .78), diff * .9 + .05) + rim * .12;
+  col *= .8 + vR * .35;
+  col += vec3(.7, .8, 1.) * smoothstep(.8, 3., vSpeed) * .5;
+  float f = 1. - exp(-uFogDensity * uFogDensity * vDepth * vDepth);
+  gl_FragColor = vec4(mix(col, uFogColor, f), 1.);
 }
 `;
 
-/* ---------- Fundo das cenas ---------- */
-// Um plano atrás de tudo: brilho colorido e faixas de luz. O gelo refrata este fundo, então ele precisa ter desenho.
-export const backdropVert = /* glsl */ `
-varying vec3 vPos;
-void main(){
-  vPos = position;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
-}
-`;
-
-export const backdropFrag = /* glsl */ `
-uniform float uTime;
-uniform vec2 uGlow;
-uniform vec3 uTint;
-uniform float uBars;
-varying vec3 vPos;
-float h(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5); }
-void main(){
-  vec2 p = vPos.xy;
-  vec3 col = vec3(.004, .007, .02);
-  float g = exp(-length((p - uGlow) * vec2(.32, .42)));
-  col += uTint * g * .6;
-  float wob = sin(p.y * .35 + uTime * .25) * .9;
-  float bars = smoothstep(.93, 1., sin(p.x * 1.15 + wob)) + smoothstep(.985, 1., sin(p.x * 3.1 - wob * 2.)) * .6;
-  col += vec3(.55, .72, 1.) * bars * g * uBars;
-  col += (h(p * 13.7) - .5) * .006;
-  gl_FragColor = vec4(col, 1.);
-}
-`;
-
-/* ---------- Pós-processo: transição congelada ---------- */
-// Mistura duas cenas (A e B) por uma frente de gelo com ruído. Na faixa da frente, a imagem racha em
-// células (voronoi) que deslocam o UV, e os canais R, G e B são lidos em pontos diferentes
-// (aberração cromática). Fora da transição, só sobra uma aberração leve nas bordas, vinheta e grão.
+/* ---------- Pós-processo: transições ---------- */
+// Mistura duas cenas (A e B) por uma frente de ruído. Dois tipos:
+//  - entre projetos (uKind = 0): a frente racha a imagem em estilhaços (voronoi) que deslocam o UV;
+//  - entre mundos (uKind = 1): rastro radial com os canais R, G e B separados (arco-íris) e névoa branca no meio.
 export const postVert = /* glsl */ `
 varying vec2 vUv;
 void main(){ vUv = uv; gl_Position = vec4(position.xy, 0., 1.); }
@@ -186,11 +155,13 @@ export const postFrag = /* glsl */ `
 uniform sampler2D tA;
 uniform sampler2D tB;
 uniform float uT;
+uniform float uKind;
 uniform float uTime;
 uniform float uVel;
 uniform float uAspect;
-uniform vec2 uRes;
 uniform float uIntro;
+uniform vec2 uRes;
+uniform vec3 uFog;
 varying vec2 vUv;
 
 float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
@@ -204,7 +175,6 @@ float fbm(vec2 p){
   for (int k = 0; k < 5; k++){ s += a * noise(p); p = p * 2.03 + 17.1; a *= .5; }
   return s;
 }
-// devolve um valor aleatório por célula: cada estilhaço desloca a imagem numa direção
 vec2 shard(vec2 p){
   vec2 i = floor(p), f = fract(p);
   float md = 8.; vec2 id = vec2(0.);
@@ -217,29 +187,40 @@ vec2 shard(vec2 p){
   }
   return id - .5;
 }
-vec3 split(sampler2D t, vec2 uv, vec2 dir){
-  return vec3(texture2D(t, uv + dir).r, texture2D(t, uv).g, texture2D(t, uv - dir).b);
+// rastro radial: 8 amostras em direção ao centro, cada canal com um comprimento diferente
+vec3 streak(sampler2D t, vec2 uv, vec2 disp, float amt){
+  vec2 dir = uv - .5;
+  vec3 acc = vec3(0.);
+  for (int k = 0; k < 8; k++){
+    vec2 o = dir * amt * float(k) / 7.;
+    acc.r += texture2D(t, uv + disp - o).r;
+    acc.g += texture2D(t, uv + disp - o * 1.3).g;
+    acc.b += texture2D(t, uv + disp - o * 1.6).b;
+  }
+  return acc / 8.;
 }
 void main(){
   vec2 uv = vUv;
+  vec2 c = uv - .5;
   vec2 p = vec2(uv.x * uAspect, uv.y);
   float n = fbm(p * 2.3 + vec2(0., uTime * .03));
   float field = n * .55 + (1. - uv.y) * .25 + uv.x * .2;
   float front = mix(-.2, 1.2, uT);
   float m = smoothstep(front + .04, front - .04, field);
-  float band = exp(-pow((field - front) * 7., 2.)) * step(.0005, uT) * step(uT, .9995);
+  float live = step(.0005, uT) * step(uT, .9995);
+  float band = exp(-pow((field - front) * 7., 2.)) * live;
+  float mid = sin(3.14159 * uT) * live;
+  float shardAmt = 1. - uKind;
   vec2 cid = shard(p * 7. + n * 2.);
-  float frostA = uT * (1. - m), frostB = (1. - uT) * m;
-  vec2 dA = cid * (band * .07 + frostA * .03);
-  vec2 dB = cid * (band * .07 + frostB * .03);
-  vec2 c = uv - .5;
-  vec2 dir = c * (.004 + band * .05 + min(uVel, 3.) * .006 + uIntro * .03);
-  vec3 a = split(tA, uv + dA, dir);
-  vec3 b = split(tB, uv + dB, dir);
-  vec3 col = mix(a, b, m);
-  col += vec3(.5, .68, 1.) * band * .28;
-  col *= mix(1., .45, smoothstep(.35, 1.1, length(c * vec2(uAspect, 1.))));
-  col += (hash(uv * uRes + fract(uTime * 7.) * 91.) - .5) * .03;
+  vec2 dA = cid * (band * .07 + uT * (1. - m) * .03) * shardAmt;
+  vec2 dB = cid * (band * .07 + (1. - uT) * m * .03) * shardAmt;
+  float sAmt = .006 + uKind * mid * .4 + band * .05 + min(uVel, 3.) * .012 + uIntro * .12;
+  vec3 col = streak(tA, uv, dA, sAmt);
+  if (live > .5) col = mix(col, streak(tB, uv, dB, sAmt), m);
+  col += vec3(.75, .85, 1.) * band * .22;
+  col = mix(col, uFog, uKind * pow(mid, 1.4) * .62 + uIntro * .6);
+  col *= mix(1., .72, smoothstep(.45, 1.25, length(c * vec2(uAspect, 1.))));
+  col += (hash(uv * uRes + fract(uTime * 7.) * 91.) - .5) * .025;
   gl_FragColor = vec4(max(col, 0.), 1.);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
