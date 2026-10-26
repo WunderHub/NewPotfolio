@@ -2,7 +2,7 @@
 // e um objeto congelado no centro (um por projeto). Tudo modelado em código.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { softDot, addRim } from './textures.js';
+import { softDot, addRim, smooth } from './textures.js';
 
 const skyVert = /* glsl */ `
 varying vec3 vDir;
@@ -86,6 +86,31 @@ export function createRing({ mobile, envMap, crack, vein }) {
   const hot = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1).multiplyScalar(4), fog: false });
   const rimIn = new THREE.Mesh(new THREE.TorusGeometry(RM - HW - .1, .03, 8, 200), hot);
   group.add(rimIn);
+
+  // dentro do gelo: bolhas de ar e lâminas de fratura com veios
+  // (as bolhas ficam por cima do anel, sem teste de profundidade, senão a transmissão borra tudo)
+  const BUB = mobile ? 260 : 600;
+  const bubMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.25, 1.3, 1.4), transparent: true, opacity: .75, depthTest: false, depthWrite: false });
+  const bubbles = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), bubMat, BUB);
+  bubbles.renderOrder = 2;
+  {
+    const d = new THREE.Object3D();
+    for (let i = 0; i < BUB; i++) {
+      const a = Math.random() * Math.PI * 2, r = RM + (Math.random() - .5) * HW * 1.6, z = (Math.random() - .5) * .6;
+      d.position.set(Math.cos(a) * r, Math.sin(a) * r, z);
+      d.scale.setScalar(.007 + Math.random() ** 4 * .035);
+      d.updateMatrix(); bubbles.setMatrixAt(i, d.matrix);
+    }
+  }
+  group.add(bubbles);
+  const fracMat = new THREE.MeshBasicMaterial({ map: vein, color: new THREE.Color(.55, .6, .7), transparent: true, opacity: .35, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  for (let i = 0; i < SEGS * 2; i++) {
+    const a = (i / (SEGS * 2)) * Math.PI * 2 + Math.random() * .2, r = RM + (Math.random() - .5) * HW;
+    const fr = new THREE.Mesh(new THREE.PlaneGeometry(.5 + Math.random() * .4, .35 + Math.random() * .3), fracMat);
+    fr.position.set(Math.cos(a) * r, Math.sin(a) * r, (Math.random() - .5) * .3);
+    fr.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+    group.add(fr);
+  }
   const membrane = new THREE.Mesh(new THREE.CircleGeometry(RM - HW - .08, 96), new THREE.ShaderMaterial({
     vertexShader: memVert, fragmentShader: memFrag, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
     uniforms: { tVein: { value: vein }, uTime: { value: 0 }, uR: { value: RM - HW - .08 }, uAmt: { value: 1 } },
@@ -141,13 +166,19 @@ export function createRing({ mobile, envMap, crack, vein }) {
     scene, camera,
     resize(w, h) { camera.aspect = w / h; camera.updateProjectionMatrix(); },
     // pose do anel para o projeto "p" com rolagem local "local" (0 = parado, 1 = saindo)
-    pose(p, local, time, look) {
+    // through = a próxima cena é o palco: a câmera atravessa o centro do anel
+    pose(p, local, time, look, through = false) {
       const s = Math.min(1, 3.35 * camera.aspect / 3.6);
       group.scale.setScalar(s);
       objects.forEach((o, i) => (o.visible = i === p));
-      group.rotation.set(look.y * -.12 + Math.sin(time * .3 + p) * .03, look.x * .18 + (local - .2) * .5, time * .02 + p * .6 + local * .35);
-      camera.position.set(look.x * .5, look.y * .35, 13);
-      camera.lookAt(0, 0, 0);
+      const arrive = local < 0 ? smooth(-.5, 0, local) : 1; // chega de longe girando
+      const leave = local > 0 ? smooth(.5, 1, local) : 0;
+      group.rotation.set(look.y * -.12 + Math.sin(time * .3 + p) * .03, look.x * .18 + (local - .2) * .5, time * .02 + p * .6 + local * .35 - (1 - arrive) * 1.4);
+      const z = leave > 0 ? 13 - leave * (through ? 19 : 7) : 13 + (1 - arrive) * (1 - arrive) * 26;
+      const calm = (1 - leave) * arrive;
+      camera.position.set(look.x * .5 * calm, look.y * .35 * calm, z);
+      camera.lookAt(look.x * .5 * calm, look.y * .35 * calm, z - 10);
+      camera.fov = 30 + (1 - arrive) * 12 + leave * (through ? 34 : 14); camera.updateProjectionMatrix();
       segs.forEach((m, i) => { m.position.set(0, 0, Math.sin(time * .6 + i) * .03 + Math.abs(local) * (m.userData.r - .5) * 1.2); });
       const o = objects[p];
       const spread = .05 + Math.max(0, local) * .9;
@@ -159,6 +190,10 @@ export function createRing({ mobile, envMap, crack, vein }) {
       });
       o.rotation.y = Math.sin(time * .35) * .25;
       membrane.material.uniforms.uTime.value = time;
+      bubMat.opacity = .75 * (1 - smooth(0, .45, Math.abs(local)));
+      bubbles.visible = bubMat.opacity > .01;
+      // o aro de luz tremula de leve, como corrente elétrica no gelo
+      hot.color.setScalar(3.6 + Math.sin(time * 13) * .25 + Math.sin(time * 31 + p) * .2 + (Math.sin(time * 2.3) > .97 ? 1.5 : 0));
       dust.rotation.y = time * .01;
     },
   };

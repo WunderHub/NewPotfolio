@@ -214,11 +214,11 @@ void main(){
   vec2 cid = shard(p * 7. + n * 2.);
   vec2 dA = cid * (band * .07 + uT * (1. - m) * .03) * shardAmt;
   vec2 dB = cid * (band * .07 + (1. - uT) * m * .03) * shardAmt;
-  float sAmt = .006 + uKind * mid * .4 + band * .05 + min(uVel, 3.) * .012 + uIntro * .12;
+  float sAmt = .006 + uKind * mid * .2 + band * .04 + min(uVel, 3.) * .012 + uIntro * .12;
   vec3 col = streak(tA, uv, dA, sAmt);
   if (live > .5) col = mix(col, streak(tB, uv, dB, sAmt), m);
   col += vec3(.75, .85, 1.) * band * .22;
-  col = mix(col, uFog, uKind * pow(mid, 1.4) * .62 + uIntro * .6);
+  col = mix(col, uFog, uKind * pow(mid, 1.6) * .5 + uIntro * .6);
   col *= mix(1., .72, smoothstep(.45, 1.25, length(c * vec2(uAspect, 1.))));
   col += (hash(uv * uRes + fract(uTime * 7.) * 91.) - .5) * .025;
   gl_FragColor = vec4(max(col, 0.), 1.);

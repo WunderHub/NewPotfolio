@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { GPUComputationRenderer } from 'three/addons/misc/GPUComputationRenderer.js';
 import { makeSky } from './ring.js';
-import { snowNormal, softDot } from './textures.js';
+import { snowNormal, softDot, smooth } from './textures.js';
 import * as S from './shaders.js';
 
 export const SHAPES = ['KR', 'Floco', 'Iglu', '@'];
@@ -40,7 +40,7 @@ export function createStage({ renderer, mobile }) {
   scene.add(halo2);
 
   /* Formas alvo das partículas */
-  const SIZE = mobile ? 96 : 160, COUNT = SIZE * SIZE;
+  const SIZE = mobile ? 112 : 208, COUNT = SIZE * SIZE;
   const CY = 1.75; // altura do centro do volume
   const fromCanvas = (draw, w = 512, h = 512) => {
     const c = document.createElement('canvas'); c.width = w; c.height = h;
@@ -95,7 +95,7 @@ export function createStage({ renderer, mobile }) {
   const ok = !gpu.init();
 
   const pu = {
-    tPos: { value: null }, tVel: { value: null }, uSize: { value: mobile ? .07 : .055 }, uScale: { value: 400 },
+    tPos: { value: null }, tVel: { value: null }, uSize: { value: mobile ? .06 : .046 }, uScale: { value: 400 },
     uLight: { value: new THREE.Vector3(.3, .9, .5).normalize() }, uFogColor: { value: FOG }, uFogDensity: { value: .035 },
   };
   const group = new THREE.Group();
@@ -123,7 +123,8 @@ export function createStage({ renderer, mobile }) {
   const mixer = { v: 1 };
   const api = {
     scene, camera, ok, shape: -1,
-    resize(w, h, pr) { camera.aspect = w / h; camera.updateProjectionMatrix(); pu.uScale.value = h * pr / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))); },
+    px: 800,
+    resize(w, h, pr) { camera.aspect = w / h; camera.updateProjectionMatrix(); api.px = h * pr; pu.uScale.value = h * pr / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))); },
     setShape(k) {
       k = ((k % SHAPES.length) + SHAPES.length) % SHAPES.length;
       if (k === shape) return;
@@ -131,7 +132,7 @@ export function createStage({ renderer, mobile }) {
       U.tB.value = targets[SHAPES[k]];
       shape = api.shape = k;
       mixer.v = 0;
-      if (window.gsap) gsap.to(mixer, { v: 1, duration: 2.4, ease: 'power2.inOut', overwrite: true }); else mixer.v = 1;
+      if (window.gsap) gsap.to(mixer, { v: 1, duration: 3, ease: 'power2.inOut', overwrite: true }); else mixer.v = 1;
     },
     // roda a simulação; chamado só quando a cena aparece
     simulate(dt, time, pointer, pointerIn, extraSteps = 0) {
@@ -145,10 +146,14 @@ export function createStage({ renderer, mobile }) {
       pu.tVel.value = gpu.getCurrentRenderTarget(velVar).texture;
     },
     pose(local, time, look) {
-      const d = Math.max(10.5, 2.8 / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect));
-      camera.position.set(look.x * .8, 2.4 + look.y * .5, d);
+      // chegada: desce do alto (vindo de dentro do anel) até a altura do palco
+      const k = local < 0 ? 1 - smooth(-.5, 0, local) : 0;
+      const d = Math.max(10.5, 2.8 / (Math.tan(THREE.MathUtils.degToRad(16)) * camera.aspect));
+      camera.position.set(look.x * .8 * (1 - k), 2.4 + look.y * .5 + k * k * 10, d - k * 4);
       pu.uFogDensity.value = scene.fog.density = .035 * Math.min(1, 10.5 / d);
-      camera.lookAt(0, 1.55, 0);
+      camera.lookAt(0, 1.55 - k * 1.2, 0);
+      camera.fov = 32 + k * 22; camera.updateProjectionMatrix();
+      pu.uScale.value = api.px / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
       group.rotation.y = Math.sin(time * .25) * .35 + look.x * .3;
       halo.position.y = 5.6 + Math.sin(time * .8) * .05;
       plane.constant = 0;
