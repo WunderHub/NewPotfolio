@@ -36,6 +36,7 @@ html.lenis, html.lenis body { height: auto; }
 .tr { top: calc(16px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); display: flex; gap: 6px; }
 .tr .chip { transition: background .25s, color .25s; }
 .tr .chip:hover { background: var(--ink); color: var(--paper); }
+#snd { min-width: 6ch; justify-content: center; }
 .bl { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 4px; justify-items: start; }
 .bl .sub { color: var(--paper); text-shadow: 0 0 8px rgba(27, 33, 48, .3); min-height: 1.4em; }
 .br { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); display: flex; gap: 8px; align-items: center; color: var(--paper); }
@@ -53,6 +54,11 @@ body[data-state="stage"] .stage-ui { opacity: 1; visibility: visible; }
 .contact { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .contact .mail { text-transform: none; letter-spacing: .02em; user-select: all; }
 body[data-state="stage"] .bl { opacity: 0; }
+/* no palco o fundo é quase branco: o texto solto do HUD passa para a cor escura */
+body[data-state="stage"] .tl .data, body[data-state="stage"] .br { color: var(--ink); text-shadow: none; }
+body[data-state="stage"] .br .bar { background: rgba(27, 33, 48, .25); }
+body[data-state="stage"] .br .bar i { background: var(--ink); }
+body[data-state="stage"] .arrow { color: var(--ink); text-shadow: none; }
 
 /* Carregamento */
 .loader { position: fixed; inset: 0; z-index: 100; background: var(--fog); display: none; flex-direction: column; justify-content: space-between; color: var(--paper);

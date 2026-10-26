@@ -27,7 +27,8 @@ export function createIglu({ mobile }) {
   const terrainH = (x, z) => {
     const r = Math.hypot(x, z);
     const ridge = 1 - Math.abs(fbm(x * .03 + 40, z * .03 + 40, 5, 7) * 2 - 1);
-    const mountains = Math.pow(ridge, 2.4) * 18 * smooth(10, 50, r);
+    const ridge2 = 1 - Math.abs(fbm(x * .07 + 9, z * .07 + 3, 4, 11) * 2 - 1);
+    const mountains = (Math.pow(ridge, 2.6) * 20 + Math.pow(ridge2, 3) * 4) * smooth(10, 50, r);
     const rolling = (fbm(x * .11, z * .11, 4, 3) - .5) * 2.2 * smooth(3, 9, r);
     const mound = 1.1 * Math.exp(-(r * r) / 45);
     const drop = -3 * smooth(6, 16, r) * (1 - smooth(18, 40, r)); // vale entre o iglu e as montanhas
@@ -41,7 +42,22 @@ export function createIglu({ mobile }) {
   tg.computeVertexNormals();
   const snowN = snowNormal(256);
   snowN.repeat.set(55, 55);
-  const terrain = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: 0xd3d9e3, roughness: .93, metalness: 0, normalMap: snowN, normalScale: new THREE.Vector2(.9, .9) }));
+  const timeU = { value: 0 };
+  const terrainMat = new THREE.MeshStandardMaterial({ color: 0xd3d9e3, roughness: .93, metalness: 0, normalMap: snowN, normalScale: new THREE.Vector2(.9, .9) });
+  // brilho da neve: pontinhos que piscam conforme o ângulo de visão
+  terrainMat.onBeforeCompile = (sh) => {
+    sh.uniforms.uTime = timeU;
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vSpk;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvSpk = (modelMatrix * vec4(transformed, 1.)).xyz;');
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSpk; uniform float uTime;\nfloat hs(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }')
+      .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+        float hh = hs(floor(vSpk * 50.));
+        float tw = .5 + .5 * sin(uTime * 3. + hh * 80. + dot(vViewPosition, vec3(4.)));
+        float spk = step(.9968, hh) * tw * tw * smoothstep(22., 5., length(vViewPosition));
+        totalEmissiveRadiance += vec3(1., 1., 1.05) * spk * 4.;`);
+  };
+  const terrain = new THREE.Mesh(tg, terrainMat);
   terrain.receiveShadow = true;
   scene.add(terrain);
   const y0 = terrainH(0, 0) - .06;
@@ -96,15 +112,88 @@ export function createIglu({ mobile }) {
   scene.add(brickMesh);
 
   // luz interna: aparece pelas frestas e pela porta (e o bloom transforma em brilho)
-  const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1.02, 1.08).multiplyScalar(5), fog: false });
+  // aditiva: com cor zero some de vez (antes de o iglu estar montado)
+  const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1.02, 1.08).multiplyScalar(5), fog: false, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
   const inner = new THREE.Mesh(new THREE.SphereGeometry(R - BD * .55, 40, 20, 0, Math.PI * 2, 0, Math.PI / 2), glowMat);
   inner.position.y = y0;
   scene.add(inner);
-  const tunnelGlow = new THREE.Mesh(new THREE.CylinderGeometry(RA - .2, RA - .2, 2, 24, 1, true, -Math.PI / 2, Math.PI), glowMat);
-  tunnelGlow.rotation.x = Math.PI / 2; tunnelGlow.position.set(0, y0, 2.3);
+  const tunnelGlow = new THREE.Mesh(new THREE.CylinderGeometry(RA - .22, RA - .22, 1.5, 24, 1, true, -Math.PI / 2, Math.PI), glowMat);
+  tunnelGlow.rotation.x = Math.PI / 2; tunnelGlow.position.set(0, y0, 2.15); // fica dentro do túnel (z 1.4 a 2.9)
   const pivot = new THREE.Group(); pivot.rotation.y = TURN; pivot.add(tunnelGlow);
   scene.add(pivot);
   core.position.set(0, y0 + .9, 0);
+
+  /* Planta técnica: arestas de cada bloco, grade no chão e traços soltos, revelados de baixo para cima na abertura */
+  const wireMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { uReveal: { value: 0 }, uAlpha: { value: 0 }, uY0: { value: y0 - .2 }, uY1: { value: y0 + R + .4 }, uTime: timeU },
+    vertexShader: `attribute float aRand; varying float vY; varying float vR;
+      void main(){ vY = position.y; vR = aRand; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `uniform float uReveal, uAlpha, uY0, uY1, uTime; varying float vY; varying float vR;
+      void main(){
+        float t = (vY - uY0) / (uY1 - uY0), front = uReveal * 1.25 - vR * .25;
+        float a = smoothstep(t - .05, t, front);
+        float head = smoothstep(t - .12, t, front) * (1. - smoothstep(t, t + .1, front)); // faixa clara onde a linha acabou de surgir
+        a *= .6 + .4 * step(.5, fract(uTime * 2.5 + vR * 7.));
+        vec3 ink = vec3(.11, .13, .19);
+        gl_FragColor = vec4(mix(ink, vec3(2.4), head), (a * .7 + head * .5) * uAlpha);
+      }`,
+  });
+  const lineSet = (pts) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts), 3));
+    const n = pts.length / 6, r = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) r[i * 2] = r[i * 2 + 1] = Math.random();
+    g.setAttribute('aRand', new THREE.BufferAttribute(r, 1));
+    const l = new THREE.LineSegments(g, wireMat); l.frustumCulled = false; scene.add(l); return l;
+  };
+  {
+    const ep = new THREE.EdgesGeometry(new THREE.BoxGeometry(BW, BH, BD)).attributes.position;
+    const m4 = new THREE.Matrix4(), v = new THREE.Vector3(), pts = [];
+    bricks.forEach((b) => { m4.compose(b.p, b.q, b.s); for (let i = 0; i < ep.count; i++) { v.fromBufferAttribute(ep, i).applyMatrix4(m4); pts.push(v.x, v.y, v.z); } });
+    lineSet(pts);
+    const grid = [];
+    for (let k = -10; k <= 10; k++) for (let j = -10; j < 10; j++) {
+      const a = k * .5, b0 = j * .5, b1 = b0 + .5;
+      if (Math.hypot(a, b0) > 5 || Math.hypot(a, b1) > 5) continue;
+      grid.push(a, terrainH(a, b0) + .03, b0, a, terrainH(a, b1) + .03, b1);
+      grid.push(b0, terrainH(b0, a) + .03, a, b1, terrainH(b1, a) + .03, a);
+    }
+    lineSet(grid);
+    const loose = [];
+    for (let i = 0; i < 140; i++) {
+      const a = Math.random() * Math.PI * 2, r = 3 + Math.random() * 7, y = y0 + Math.random() * 5;
+      const p = new THREE.Vector3(Math.cos(a) * r, y, Math.sin(a) * r), d = new THREE.Vector3().randomDirection().multiplyScalar(.3 + Math.random() * 1.4);
+      loose.push(p.x, p.y, p.z, p.x + d.x, p.y + d.y, p.z + d.z);
+    }
+    lineSet(loose);
+  }
+  bricks.forEach((b) => { b.o = Math.min(1, Math.max(0, (b.p.y - y0) / R) * .85 + b.r1 * .15); });
+
+  /* Névoa em camadas: lençóis de ruído que passam devagar atrás do iglu */
+  const mistMat = (seed, alpha) => new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: { uTime: timeU, uColor: { value: FOG }, uSeed: { value: seed }, uAlpha: { value: alpha } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.); }`,
+    fragmentShader: `uniform float uTime, uSeed, uAlpha; uniform vec3 uColor; varying vec2 vUv;
+      float h(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float n(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3. - 2. * f); return mix(mix(h(i), h(i + vec2(1., 0.)), u.x), mix(h(i + vec2(0., 1.)), h(i + vec2(1., 1.)), u.x), u.y); }
+      float fbm(vec2 p){ float a = .5, s = 0.; for (int k = 0; k < 5; k++){ s += a * n(p); p *= 2.02; a *= .5; } return s; }
+      void main(){
+        vec2 p = vUv * vec2(7., 1.6) + vec2(uTime * .025 + uSeed, uSeed * .37);
+        float m = fbm(p + fbm(p * 1.6 - vec2(uTime * .02, 0.)));
+        float a = smoothstep(.38, .8, m) * smoothstep(0., .3, vUv.y) * smoothstep(1., .4, vUv.y) * smoothstep(0., .12, vUv.x) * smoothstep(1., .88, vUv.x);
+        gl_FragColor = vec4(uColor * 1.05, a * uAlpha);
+      }`,
+  });
+  [[11, 1.4, .5], [17, 3, .6], [26, 5, .7], [36, 8, .8]].forEach(([r, hgt, al], i) => {
+    const sheet = new THREE.Mesh(new THREE.PlaneGeometry(90, 6 + hgt * 1.5), mistMat(i * 3.7, al));
+    const a = .62 + Math.PI;
+    sheet.position.set(Math.sin(a) * r, y0 - 1 + hgt, Math.cos(a) * r);
+    sheet.rotation.y = .62;
+    sheet.renderOrder = -1 - i;
+    scene.add(sheet);
+  });
 
   /* Neve caindo */
   const FLAKES = mobile ? 1200 : 2600;
@@ -124,35 +213,52 @@ export function createIglu({ mobile }) {
   const hit = new THREE.Vector3(), tmp = new THREE.Vector3(), q2 = new THREE.Quaternion();
   const api = {
     scene, camera, y0,
-    explode: 2.4, // começa espalhado; a entrada monta o iglu
+    explode: 0,  // blocos afastados (rolagem)
+    build: 0,    // 0 = blocos no céu, 1 = iglu montado (abertura)
+    wire: 0,     // revelação da planta técnica
+    wireAlpha: 0,
+    onPop: null, // chamado quando o cursor solta um bloco (som)
     markers: [],
     resize(w, h) { camera.aspect = w / h; camera.updateProjectionMatrix(); },
     update(dt, time, local, pointer, pointerIn, look) {
       // câmera: órbita lenta + paralaxe; a rolagem sobe e aproxima
-      const ang = .62 + Math.sin(time * .05) * .06 + look.x * .08 - local * .5;
-      const dist = Math.max(10.4, 3.2 / (Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect)) - local * 2.5;
-      camera.position.set(Math.sin(ang) * dist, 2.7 + y0 + look.y * .5 + local * 2.2, Math.cos(ang) * dist);
-      camera.lookAt(0, y0 + 1.25 + local * .6, 0);
+      // na saída (segunda metade), a câmera sobe por cima do iglu e mergulha na névoa, abrindo a lente
+      const fly = smooth(.5, 1, local);
+      const ang = .62 + Math.sin(time * .05) * .06 + look.x * .08 - local * .5 - fly * .5;
+      const dist = Math.max(10.4, 3.2 / (Math.tan(THREE.MathUtils.degToRad(15)) * camera.aspect)) - local * 2.5 - fly * 5;
+      camera.position.set(Math.sin(ang) * dist, 2.7 + y0 + look.y * .5 + local * 2.2 + fly * fly * 7, Math.cos(ang) * dist);
+      camera.lookAt(0, y0 + 1.25 + local * .6 + fly * 6, 0);
+      camera.fov = 30 + fly * 28; camera.updateProjectionMatrix();
 
       // cursor sobre a cúpula
       let hasHit = false;
       if (pointerIn) { ray.setFromCamera(pointer, camera); hasHit = !!ray.ray.intersectSphere(sphere, hit); }
       const ex = api.explode + smooth(.02, .5, local) * 1.3;
+      let popped = false;
       for (const b of bricks) {
         const target = hasHit ? smooth(.95, .15, b.p.distanceTo(hit)) * .3 : 0;
+        if (target > .12 && b.hover < .06) popped = true;
         b.hover += (target - b.hover) * Math.min(1, dt * 6);
-        const e = ex * (.35 + b.r1 * 1.4) + b.hover;
-        b.cur.copy(b.p).addScaledVector(b.n, e).addScaledVector(tmp.set(0, 1, 0), ex * ex * b.r2 * .9);
+        // abertura: cada bloco cai do céu na sua vez, de baixo para cima
+        const bb = smooth(b.o * .6, b.o * .6 + .4, api.build), drop = 1 - bb;
+        const e = ex * (.35 + b.r1 * 1.4) + b.hover + drop * 1.2;
+        b.cur.copy(b.p).addScaledVector(b.n, e).addScaledVector(tmp.set(0, 1, 0), ex * ex * b.r2 * .9 + drop * drop * 8);
         dummy.position.copy(b.cur);
-        dummy.quaternion.copy(b.q).multiply(q2.setFromAxisAngle(b.axis, (ex * (b.r3 - .5) * 2.4) + b.hover * (b.r3 - .5) * .8));
+        dummy.quaternion.copy(b.q).multiply(q2.setFromAxisAngle(b.axis, (ex * (b.r3 - .5) * 2.4) + b.hover * (b.r3 - .5) * .8 + drop * (b.r3 - .5) * 3));
         dummy.scale.copy(b.s);
         dummy.updateMatrix();
         brickMesh.setMatrixAt(b.idx, dummy.matrix);
       }
       brickMesh.instanceMatrix.needsUpdate = true;
+      if (popped && api.onPop) api.onPop();
+      timeU.value = time;
+      wireMat.uniforms.uReveal.value = api.wire;
+      wireMat.uniforms.uAlpha.value = api.wireAlpha;
       const open = Math.min(1, ex * .8 + Math.max(...markerIdx.map((i) => bricks[i].hover)) * .4);
-      glowMat.color.setRGB(1, 1.02, 1.08).multiplyScalar(4 + open * 6);
-      core.intensity = 18 + open * 60;
+      const lit = smooth(.55, 1, api.build); // a luz de dentro acende quando os blocos fecham a cúpula
+      glowMat.color.setRGB(1, 1.02, 1.08).multiplyScalar((4 + open * 6) * lit);
+      inner.visible = tunnelGlow.visible = lit > .001;
+      core.intensity = (18 + open * 60) * lit;
 
       // neve: cai com vento e volta ao topo
       const a = fg.attributes.position.array;

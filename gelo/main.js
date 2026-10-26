@@ -8,6 +8,7 @@ import { createIglu } from './iglu.js';
 import { createRing } from './ring.js';
 import { createStage, SHAPES } from './stage.js';
 import * as S from './shaders.js';
+import { createSound } from './sound.js';
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
@@ -67,6 +68,9 @@ const envMap = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(
 const iglu = createIglu({ mobile });
 const ring = createRing({ mobile, envMap, crack: crackNormal(512), vein: veinTexture(512) });
 const stage = createStage({ renderer, mobile });
+const sound = createSound();
+iglu.onPop = () => sound.pop();
+if (params.has('debug')) window.__gelo = { iglu, ring, stage, intro: null, sound };
 
 /* ---------- Pós-processo ---------- */
 const rtOpts = { type: THREE.HalfFloatType, samples: 4 };
@@ -125,7 +129,7 @@ $$('[data-go]').forEach((a) => a.addEventListener('click', (e) => { e.preventDef
 /* ---------- Painel do palco: formas e contato ---------- */
 const shapeName = $('#shapeName');
 let autoShape = true, shapeTimer = 0;
-const setShape = (k) => { stage.setShape(k); scramble(shapeName, `${String(stage.shape + 1).padStart(2, '0')} / ${String(SHAPES.length).padStart(2, '0')} · ${SHAPES[stage.shape]}`); shapeTimer = 0; };
+const setShape = (k) => { const prev = stage.shape; stage.setShape(k); if (prev >= 0) sound.chime(stage.shape); scramble(shapeName, `${String(stage.shape + 1).padStart(2, '0')} / ${String(SHAPES.length).padStart(2, '0')} · ${SHAPES[stage.shape]}`); shapeTimer = 0; };
 $('#prev').addEventListener('click', () => { autoShape = false; setShape(stage.shape - 1); });
 $('#next').addEventListener('click', () => { autoShape = false; setShape(stage.shape + 1); });
 addEventListener('keydown', (e) => {
@@ -141,8 +145,11 @@ $('#copy').addEventListener('click', () => {
 /* ---------- Troca de estado (HUD) ---------- */
 function setActive(s) {
   if (s === active) return;
+  const prevW = active >= 0 ? STATES[active].w : null;
   active = s;
   const st = STATES[s];
+  if (prevW) sound.whoosh(prevW !== st.w);
+  sound.setScene(st.w);
   scramble($('#labelA'), st.a);
   scramble($('#labelB'), st.b || ' ');
   scramble($('#dScene'), `SCN ${String(s).padStart(2, '0')} · ${st.scn}`);
@@ -154,11 +161,12 @@ function setActive(s) {
 /* ---------- Render ---------- */
 let time = 0, frames = 0, fpsT = 0;
 const intro = { v: 1 };
+if (window.__gelo) window.__gelo.intro = intro;
 function renderState(s, local, target, dt) {
   const st = STATES[s];
   renderer.setRenderTarget(target);
   if (st.w === 'iglu') renderer.render(iglu.scene, iglu.camera);
-  else if (st.w === 'ring') { ring.pose(st.p, local, time, look); renderer.render(ring.scene, ring.camera); }
+  else if (st.w === 'ring') { ring.pose(st.p, local, time, look, STATES[s + 1]?.w === 'stage'); renderer.render(ring.scene, ring.camera); }
   else { stage.pose(local, time, look); renderer.render(stage.scene, stage.camera); }
   bloom.render(renderer, null, target, dt, false);
 }
@@ -166,7 +174,7 @@ function renderState(s, local, target, dt) {
 let hudShown = true;
 function drawHud() {
   hg.clearRect(0, 0, hud.width, hud.height);
-  const a = (1 - smooth(.05, .35, P)) * (1 - clamp(iglu.explode, 0, 1)) * (entered ? 1 : 0);
+  const a = (1 - smooth(.05, .35, P)) * smooth(.85, 1, iglu.build) * (1 - clamp(iglu.explode, 0, 1)) * (entered ? 1 : 0);
   if ((a >= .01) !== hudShown) { hudShown = a >= .01; hud.style.visibility = hudShown ? 'visible' : 'hidden'; }
   if (!hudShown) return;
   const pts = iglu.markers.filter((m) => m.z < 1).map((m) => ({ x: (m.x * .5 + .5) * hud.width, y: (-m.y * .5 + .5) * hud.height, n: m.n }));
@@ -252,11 +260,20 @@ function enter() {
   if (lenis) lenis.start();
   const hash = /^#s(\d)$/.exec(location.hash);
   if (hash) { const y = +hash[1] / (N - 1) * maxScroll(); scrollTo(0, y); lenis?.scrollTo(y, { immediate: true }); }
+  sound.enable(); updateSoundBtn(); sound.whoosh(true);
   if (window.gsap && !reduce) {
+    // abertura: a névoa abre, a planta técnica do iglu aparece em linhas, os blocos caem no lugar e as linhas somem
     gsap.to(loader, { opacity: 0, duration: .8, ease: 'power2.out', onComplete: () => loader.remove() });
-    gsap.to(intro, { v: 0, duration: 2.2, ease: 'power3.out' });
-    gsap.to(iglu, { explode: 0, duration: 3.4, ease: 'expo.out', delay: .1 });
-  } else { loader.remove(); intro.v = 0; iglu.explode = 0; }
+    gsap.timeline()
+      .to(intro, { v: 0, duration: 2, ease: 'power2.out' }, 0)
+      .to(iglu, { wireAlpha: 1, duration: .4 }, .2)
+      .to(iglu, { wire: 1, duration: 1.6, ease: 'power2.inOut' }, .2)
+      .to(iglu, { build: 1, duration: 3.2, ease: 'power2.out' }, 1)
+      .to(iglu, { wireAlpha: 0, duration: 1.2, ease: 'power1.in' }, 3.4);
+  } else { loader.remove(); intro.v = 0; iglu.build = 1; }
 }
 enterBtn.addEventListener('click', enter);
+const sndBtn = $('#snd');
+function updateSoundBtn() { sndBtn.classList.toggle('on', sound.on); sndBtn.setAttribute('aria-pressed', String(sound.on)); scramble(sndBtn, sound.on ? 'Som' : 'Mudo'); sndBtn.setAttribute('aria-label', sound.on ? 'Desligar som' : 'Ligar som'); }
+sndBtn.addEventListener('click', () => { sound.toggle(); updateSoundBtn(); });
 addEventListener('keydown', (e) => { if (!entered && !enterBtn.disabled && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); enter(); } });
