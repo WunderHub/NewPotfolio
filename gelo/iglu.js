@@ -1,5 +1,5 @@
 // Cena 1: um iglu de blocos de neve no alto de uma montanha, com névoa e neve caindo.
-// Os blocos se montam na entrada, se afastam sob o cursor e explodem com a rolagem, deixando vazar a luz de dentro.
+// Os blocos se montam na entrada, fogem do cursor acendendo em azul gelo e explodem com a rolagem, deixando vazar a luz de dentro.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { fbm, smooth, snowNormal, brickNormal, softDot, addRim } from './textures.js';
@@ -100,13 +100,26 @@ export function createIglu({ mobile }) {
   bricks.forEach((b, i) => {
     b.r1 = Math.random(); b.r2 = Math.random(); b.r3 = Math.random();
     b.axis = new THREE.Vector3(Math.random() - .5, Math.random() - .5, Math.random() - .5).normalize();
-    b.hover = 0; b.cur = new THREE.Vector3();
+    b.hover = 0; b.cur = new THREE.Vector3(); b.away = new THREE.Vector3();
     b.idx = i;
   });
 
   const bN = brickNormal(256);
   const brickMat = addRim(new THREE.MeshStandardMaterial({ color: 0xaeb7c5, roughness: .82, metalness: 0, normalMap: bN, normalScale: new THREE.Vector2(1.1, 1.1) }), 0xe8f0ff, 3, .55);
-  const brickMesh = new THREE.InstancedMesh(new RoundedBoxGeometry(BW, BH, BD, 3, .07), brickMat, bricks.length);
+  // blocos que o cursor afasta ficam azul gelo e brilham (o bloom faz o halo)
+  const glowArr = new Float32Array(bricks.length);
+  const brickGeo = new RoundedBoxGeometry(BW, BH, BD, 3, .07);
+  brickGeo.setAttribute('aGlow', new THREE.InstancedBufferAttribute(glowArr, 1).setUsage(THREE.DynamicDrawUsage));
+  const rimCompile = brickMat.onBeforeCompile;
+  brickMat.onBeforeCompile = (sh, r) => {
+    rimCompile(sh, r);
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float aGlow; varying float vGlow;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = aGlow;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vGlow;')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(.4, .64, .95), vGlow * .8);')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(.28, .62, 1.5) * vGlow * vGlow * 2.6;');
+  };
+  const brickMesh = new THREE.InstancedMesh(brickGeo, brickMat, bricks.length);
   brickMesh.castShadow = brickMesh.receiveShadow = true;
   brickMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   scene.add(brickMesh);
@@ -210,6 +223,7 @@ export function createIglu({ mobile }) {
   /* Estado */
   const ray = new THREE.Raycaster();
   const sphere = new THREE.Sphere(new THREE.Vector3(0, y0, 0), R + .1);
+  const PUSH_R = 1.35; // raio de alcance do cursor
   const hit = new THREE.Vector3(), tmp = new THREE.Vector3(), q2 = new THREE.Quaternion();
   const api = {
     scene, camera, y0,
@@ -230,31 +244,37 @@ export function createIglu({ mobile }) {
       camera.lookAt(0, y0 + 1.25 + local * .6 + fly * 6, 0);
       camera.fov = 30 + fly * 28; camera.updateProjectionMatrix();
 
-      // cursor sobre a cúpula
-      let hasHit = false;
-      if (pointerIn) { ray.setFromCamera(pointer, camera); hasHit = !!ray.ray.intersectSphere(sphere, hit); }
+      // ponto do cursor: onde o raio toca a cúpula, ou o ponto do raio mais perto dela (cursor rente à borda)
+      const hasHit = pointerIn;
+      if (pointerIn) { ray.setFromCamera(pointer, camera); if (!ray.ray.intersectSphere(sphere, hit)) ray.ray.closestPointToPoint(sphere.center, hit); }
       const ex = api.explode + smooth(.02, .5, local) * 1.3;
-      let popped = false;
+      let popped = false, maxHover = 0;
       for (const b of bricks) {
-        const target = hasHit ? smooth(.95, .15, b.p.distanceTo(hit)) * .3 : 0;
-        if (target > .12 && b.hover < .06) popped = true;
-        b.hover += (target - b.hover) * Math.min(1, dt * 6);
+        // perto do cursor o bloco foge: sai para fora e para longe do ponto do cursor; depois volta devagar
+        const target = hasHit ? smooth(PUSH_R, .25, b.p.distanceTo(hit)) : 0;
+        if (target > .35 && b.hover < .15) popped = true;
+        b.hover += (target - b.hover) * Math.min(1, dt * (target > b.hover ? 7 : 2.6));
+        const h = b.hover;
+        if (target > .01) b.away.lerp(tmp.copy(b.p).sub(hit).addScaledVector(b.n, -tmp.dot(b.n)).normalize(), Math.min(1, dt * 8));
+        glowArr[b.idx] = smooth(.05, .85, h);
+        maxHover = Math.max(maxHover, h);
         // abertura: cada bloco cai do céu na sua vez, de baixo para cima
         const bb = smooth(b.o * .6, b.o * .6 + .4, api.build), drop = 1 - bb;
-        const e = ex * (.35 + b.r1 * 1.4) + b.hover + drop * 1.2;
-        b.cur.copy(b.p).addScaledVector(b.n, e).addScaledVector(tmp.set(0, 1, 0), ex * ex * b.r2 * .9 + drop * drop * 8);
+        const e = ex * (.35 + b.r1 * 1.4) + h * (.5 + Math.sin(time * 2.2 + b.idx * 1.7) * .08) + drop * 1.2;
+        b.cur.copy(b.p).addScaledVector(b.n, e).addScaledVector(b.away, h * .55).addScaledVector(tmp.set(0, 1, 0), ex * ex * b.r2 * .9 + drop * drop * 8);
         dummy.position.copy(b.cur);
-        dummy.quaternion.copy(b.q).multiply(q2.setFromAxisAngle(b.axis, (ex * (b.r3 - .5) * 2.4) + b.hover * (b.r3 - .5) * .8 + drop * (b.r3 - .5) * 3));
+        dummy.quaternion.copy(b.q).multiply(q2.setFromAxisAngle(b.axis, (ex * (b.r3 - .5) * 2.4) + h * (b.r3 - .5) * 1.1 + drop * (b.r3 - .5) * 3));
         dummy.scale.copy(b.s);
         dummy.updateMatrix();
         brickMesh.setMatrixAt(b.idx, dummy.matrix);
       }
       brickMesh.instanceMatrix.needsUpdate = true;
+      brickGeo.attributes.aGlow.needsUpdate = true;
       if (popped && api.onPop) api.onPop();
       timeU.value = time;
       wireMat.uniforms.uReveal.value = api.wire;
       wireMat.uniforms.uAlpha.value = api.wireAlpha;
-      const open = Math.min(1, ex * .8 + Math.max(...markerIdx.map((i) => bricks[i].hover)) * .4);
+      const open = Math.min(1, ex * .8 + maxHover * .2);
       const lit = smooth(.55, 1, api.build); // a luz de dentro acende quando os blocos fecham a cúpula
       glowMat.color.setRGB(1, 1.02, 1.08).multiplyScalar((4 + open * 6) * lit);
       inner.visible = tunnelGlow.visible = lit > .001;
